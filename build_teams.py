@@ -1,6 +1,9 @@
 import pandas as pd
 from pathlib import Path
 
+
+#settings
+
 ROOT = Path(__file__).resolve().parent
 out = ROOT / "data" / "clean" / "player_games.parquet"
 out.parent.mkdir(parents=True, exist_ok=True)
@@ -11,11 +14,15 @@ team_dir = Path("./data/raw/team_gamelogs")
 
 
 players = pd.read_parquet(player_dir)
+
+#convert GAME_DATE column from string to DATE
 players["GAME_DATE"] = pd.to_datetime(players["GAME_DATE"])
 
 teams = pd.read_parquet(team_dir)
 pd.set_option("display.max_columns", None)
 teams["GAME_DATE"] = pd.to_datetime(teams["GAME_DATE"])
+
+#Verify that the # of rows doesnt change after the join
 n_before = len(teams)
 
 # 1. Possessions per team per game (0.44 standard estimate coming from pro basketball analysts)
@@ -32,26 +39,29 @@ assert len(teams) == n_before, "each game should have exactly 2 team rows"
 teams["PACE"]    = (teams["POSS"] + teams["OPP_POSS"]) / 2
 teams["DEF_RTG"] = 100 * teams["PTS_ALLOWED"] / teams["OPP_POSS"]  # pts allowed per 100 poss
 
-# --- 4. Rolling averages over PREVIOUS games only
+# 4. Rolling averages over PREVIOUS games only
 teams = teams.sort_values(["TEAM_ID", "GAME_DATE"])
 g = teams.groupby(["TEAM_ID", "SEASON"])
 for col in ["PTS_ALLOWED", "PACE", "DEF_RTG"]:
     teams[f"{col}_ROLL10"] = g[col].transform(
+        #Take last 10 games, minimum of 3, ignore the current game, 
         lambda s: s.shift(1).rolling(10, min_periods=3).mean())
 
+#Save edited parquet to clean folder
 teams.to_parquet("data/clean/team_features.parquet", index=False)
 print(teams.columns.tolist())
 print(teams[["TEAM_ABBREVIATION", "OPP_TEAM_ABBREVIATION", "OPP_TEAM_NAME"]].head())
 
+#Ensure this length is the same as first length from above
 n_players = len(players)
 
-# --- Join 1: who is the opponent?
+# Join 1: who is the opponent?
 opp_info = teams[["GAME_ID", "TEAM_ID", "OPP_TEAM_ID",
                   "OPP_TEAM_ABBREVIATION", "OPP_TEAM_NAME"]]
 players = players.merge(opp_info, on=["GAME_ID", "TEAM_ID"],
                         how="left", validate="many_to_one")
 
-# --- Join 2: that opponent's defense coming into the game
+# Join 2: that opponent's defense coming into the game
 opp_feats = teams[["GAME_ID", "TEAM_ID",
                    "PTS_ALLOWED_ROLL10", "PACE_ROLL10", "DEF_RTG_ROLL10"]].rename(columns={
     "TEAM_ID": "OPP_TEAM_ID",
@@ -65,25 +75,28 @@ players = players.merge(opp_feats, on=["GAME_ID", "OPP_TEAM_ID"],
 assert len(players) == n_players, "join duplicated rows!"
 print(players[["OPP_TEAM_ID", "OPP_DEF_RTG_ROLL10"]].isna().sum())
 
-# --- 1. Home / away from MATCHUP ("LAL vs. BOS" = home, "LAL @ BOS" = away)
+# 1. Home / away from MATCHUP ("LAL vs. BOS" = home, "LAL @ BOS" = away)
 players["HOME"] = players["MATCHUP"].str.contains("vs.", regex=False).astype(int)
 
-# --- 2. Tip-off time from the schedule (for the news cutoff later)
+# 2. Tip-off time from the schedule (for the news cutoff later)
 schedule = pd.read_parquet(schedule_dir)[["gameId", "gameDateTimeUTC"]]
 schedule = schedule.rename(columns={"gameId": "GAME_ID", "gameDateTimeUTC": "TIPOFF_UTC"})
 schedule["TIPOFF_UTC"] = pd.to_datetime(schedule["TIPOFF_UTC"], utc=True)
 players = players.merge(schedule, on="GAME_ID", how="left", validate="many_to_one")
 assert len(players) == n_players
 
-# --- 3. Sort each player's games in date order (required for everything below)
+# 3. Sort each player's games in date order (required for everything below)
 players = players.sort_values(["PLAYER_ID", "GAME_DATE"])
 gp = players.groupby("PLAYER_ID")
 
-# --- 4. Rest days and back-to-backs
+# 4. Rest days and back-to-backs. Calculated using game dates
 players["REST_DAYS"] = gp["GAME_DATE"].diff().dt.days.clip(upper=7)
 players["B2B"] = (players["REST_DAYS"] == 1).astype(int)
 
-# --- 5. Player rolling features (previous games only!)
+players["GAMES_PLAYED"] = gp.cumcount()  # cumcount() numbers each player's rows 0,1,2. Table already sorted by player so this can track # of games
+players["GAMES_PLAYED_SEASON"] = players.groupby(["PLAYER_ID", "SEASON"]).cumcount()  # this season only
+
+# 5. Player rolling features (previous games only!)
 for col in ["PTS", "MIN", "FGA", "FTA"]:
     for w in [5, 10]:
         players[f"{col}_ROLL{w}"] = gp[col].transform(
@@ -91,10 +104,10 @@ for col in ["PTS", "MIN", "FGA", "FTA"]:
 players["PTS_STD10"] = gp["PTS"].transform(
     lambda s: s.shift(1).rolling(10, min_periods=3).std())
 
-# --- 6. Proxy prop line: recent scoring average rounded to nearest 0.5
+# 6. Proxy prop line: recent scoring average rounded to nearest 0.5
 players["PROXY_LINE"] = (players["PTS_ROLL10"] * 2).round() / 2
 
-# --- 7. Save
+# 7. Save clean edited parquet to clean folder
 players.to_parquet("data/clean/players_features.parquet")
 
 #for parquet_path in sorted(player_dir.glob("*.parquet")): #glob() returns all files matching the pattern, sorted() sorts them alphabetically
