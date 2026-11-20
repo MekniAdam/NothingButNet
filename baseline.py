@@ -18,6 +18,8 @@ from scipy.stats import norm
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import StandardScaler
 
+from runlog import save_metrics, start_run
+
 ROOT = Path(__file__).resolve().parent
 DATA = ROOT / "data" / "clean" / "players_features.parquet"
 MODEL_DIR = ROOT / "models"
@@ -62,6 +64,14 @@ def evaluate(name, y, mu, sigma, line):
 
 # ------------------------------------------------------------------ main
 def main():
+    # Run folder: params.json + log.txt + metrics.json (see runlog.py)
+    run_dir = start_run("baseline", {
+        "model": "LinearRegression + one fixed sigma",
+        "features": FEATURES, "target": TARGET, "line": LINE,
+        "split": {"train": "<= 2023-24", "val": "2024-25"},
+        "seed": None,   # nothing random here: least squares gives the same answer every run
+    })
+
     df = pd.read_parquet(DATA)
 
     # --- split by season (time)
@@ -95,8 +105,14 @@ def main():
     # naive reference: just predict the 10-game average, same fixed-sigma idea
     naive_mu_train = train["PTS_ROLL10"].to_numpy()
     naive_sigma = np.std(y_train - naive_mu_train)
-    evaluate("naive (10-game avg)", y_val, val["PTS_ROLL10"].to_numpy(), naive_sigma, line_val)
-    evaluate("linear regression", y_val, model.predict(X_val), sigma, line_val)
+    naive_res = evaluate("naive (10-game avg)", y_val, val["PTS_ROLL10"].to_numpy(),
+                         naive_sigma, line_val)
+    linreg_res = evaluate("linear regression", y_val, model.predict(X_val), sigma, line_val)
+    save_metrics(run_dir, {
+        "train_rows": len(train), "val_rows": len(val),
+        "sigma": sigma, "naive_sigma": naive_sigma,
+        "val": {"naive (10-game avg)": naive_res, "linear regression": linreg_res},
+    })
 
     # --- which features matter? (coefficients are comparable because inputs are scaled)
     coefs = pd.Series(model.coef_, index=FEATURES).sort_values(key=abs, ascending=False)
@@ -109,6 +125,10 @@ def main():
     joblib.dump({"model": model, "sigma": sigma, "features": FEATURES},
                 MODEL_DIR / "baseline_model.pkl")
     print(f"\nsaved to {MODEL_DIR}")
+    # copy into the run folder too, so this exact model stays with its metrics
+    joblib.dump(scaler, run_dir / "baseline_scaler.pkl")
+    joblib.dump({"model": model, "sigma": sigma, "features": FEATURES},
+                run_dir / "baseline_model.pkl")
 
     scaler = joblib.load("models/baseline_scaler.pkl")
     saved  = joblib.load("models/baseline_model.pkl")

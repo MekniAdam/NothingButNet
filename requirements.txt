@@ -18,6 +18,8 @@ requests-oauthlib  # Yahoo Fantasy API (OAuth)
 torch            # LSTM + probabilistic head (install CUDA build first, see note above)
 transformers     # DistilBERT
 scikit-learn     # StandardScaler, metrics, baseline linear regression
+scipy            # normal distribution (NLL, over/under probability) in baseline.py
+joblib           # save/load the baseline model and scaler
 
 # --- Evaluation & plots ---
 matplotlib

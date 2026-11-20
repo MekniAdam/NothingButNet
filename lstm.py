@@ -29,6 +29,11 @@ from torch.utils.data import DataLoader, TensorDataset
 # Reuse the exact same metrics, features and row filter as the baseline,
 # so the comparison is apples to apples.
 from baseline import FEATURES, LINE, TARGET, evaluate
+from runlog import save_metrics, start_run
+
+import matplotlib
+matplotlib.use("Agg")          # draw plots to files, no window needed
+import matplotlib.pyplot as plt
 
 ROOT = Path(__file__).resolve().parent
 DATA = ROOT / "data" / "clean" / "players_features.parquet"
@@ -137,7 +142,42 @@ def predict(model, seq, ctx, stats, device):
 
 
 # ------------------------------------------------------------------ main
+def save_checkpoint(model, stats, path):
+    """Weights + scaling stats + settings: everything needed to predict later."""
+    torch.save({"state_dict": model.state_dict(), "stats": stats,
+                "config": dict(SEQ_LEN=SEQ_LEN, SEQ_COLS=SEQ_COLS, CTX_COLS=CTX_COLS,
+                               HIDDEN=HIDDEN)},
+               path)
+
+
+def plot_learning_curve(history, best_epoch, baseline_nll, path):
+    """Train vs val NLL per epoch, both in points so they share one axis."""
+    epochs = [h["epoch"] for h in history]
+    fig, ax = plt.subplots(figsize=(6, 4))
+    ax.plot(epochs, [h["train_nll"] for h in history], marker="o", label="train NLL")
+    ax.plot(epochs, [h["val_nll"] for h in history], marker="o", label="val NLL (2024-25)")
+    ax.axvline(best_epoch, color="gray", linestyle=":", label=f"best epoch ({best_epoch})")
+    if baseline_nll is not None:
+        ax.axhline(baseline_nll, color="red", linestyle="--",
+                   label=f"linear regression val NLL ({baseline_nll:.3f})")
+    ax.set_xlabel("epoch")
+    ax.set_ylabel("Gaussian NLL (points, lower is better)")
+    ax.set_title("LSTM learning curve")
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+
+
 def main():
+    # Run folder: params.json + log.txt + metrics.json + history.csv + plots (see runlog.py)
+    run_dir = start_run("lstm", {
+        "SEQ_LEN": SEQ_LEN, "SEQ_COLS": SEQ_COLS, "CTX_COLS": CTX_COLS,
+        "HIDDEN": HIDDEN, "BATCH": BATCH, "LR": LR, "MAX_EPOCHS": MAX_EPOCHS,
+        "PATIENCE": PATIENCE, "seed": SEED,
+        "split": {"train": "<= 2023-24", "val": "2024-25"},
+    })
+
     torch.manual_seed(SEED)
     np.random.seed(SEED)
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -158,6 +198,10 @@ def main():
 
     y_val, line_val = y[val_m], df.loc[val_m, LINE].to_numpy(float)
     best_nll, best_state, bad_epochs = np.inf, None, 0
+    best_epoch, history = 0, []
+    # train loss is in standardized units; adding these constants turns it into NLL in
+    # points (same scale as val NLL), because sigma_points = sigma_scaled * y_std
+    to_points = np.log(stats["y_std"]) + 0.5 * np.log(2 * np.pi)
 
     for epoch in range(1, MAX_EPOCHS + 1):
         model.train()
@@ -174,11 +218,16 @@ def main():
         mu_v, sig_v = predict(model, seq[val_m], ctx[val_m], stats, device)
         val_nll = np.mean(np.log(sig_v) + 0.5 * ((y_val - mu_v) / sig_v) ** 2
                           + 0.5 * np.log(2 * np.pi))
-        print(f"epoch {epoch:2d}  train loss {total / len(train_ds):.4f}  val NLL {val_nll:.4f}")
+        train_loss = total / len(train_ds)
+        print(f"epoch {epoch:2d}  train loss {train_loss:.4f}  val NLL {val_nll:.4f}")
+        history.append({"epoch": epoch, "train_loss": train_loss,
+                        "train_nll": train_loss + to_points, "val_nll": val_nll})
+        pd.DataFrame(history).to_csv(run_dir / "history.csv", index=False)
 
         if val_nll < best_nll - 1e-4:
-            best_nll, bad_epochs = val_nll, 0
+            best_nll, bad_epochs, best_epoch = val_nll, 0, epoch
             best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+            save_checkpoint(model, stats, run_dir / "best.pt")   # checkpoint on every improvement
         else:
             bad_epochs += 1
             if bad_epochs >= PATIENCE:
@@ -199,8 +248,11 @@ def main():
         mu_b = saved["model"].predict(scaler.transform(val[saved["features"]]))
         results = {"linear regression": (mu_b, np.full_like(mu_b, saved["sigma"])), **results}
 
+    metrics = {"train_rows": int(train_m.sum()), "val_rows": int(val_m.sum()),
+               "parameters": n_params, "best_epoch": best_epoch,
+               "epochs_run": len(history), "val": {}, "val_by_tier": {}}
     for name, (mu, sig) in results.items():
-        evaluate(name, y_val, mu, sig, line_val)
+        metrics["val"][name] = evaluate(name, y_val, mu, sig, line_val)
 
     # Does a per-player sigma fix calibration where the fixed sigma failed?
     print("\nBy player type:")
@@ -210,20 +262,27 @@ def main():
     for tier, m in tiers.items():
         m = m.to_numpy()
         print(f"  {tier}  ({m.sum():,} rows)")
+        metrics["val_by_tier"][tier] = {"rows": int(m.sum())}
         for name, (mu, sig) in results.items():
-            evaluate(f"    {name}", y_val[m], mu[m], sig[m], line_val[m])
+            metrics["val_by_tier"][tier][name] = evaluate(
+                f"    {name}", y_val[m], mu[m], sig[m], line_val[m])
 
     print("\nLSTM sigma (points):")
+    metrics["lstm_median_sigma"] = {}
     for tier, m in tiers.items():
-        print(f"  {tier:<20} median sigma = {np.median(sig_v[m.to_numpy()]):.2f}")
+        med = np.median(sig_v[m.to_numpy()])
+        metrics["lstm_median_sigma"][tier] = med
+        print(f"  {tier:<20} median sigma = {med:.2f}")
 
     # ------------------------------------------------------------ save
+    save_metrics(run_dir, metrics)
+    baseline_nll = metrics["val"].get("linear regression", {}).get("nll")
+    plot_learning_curve(history, best_epoch, baseline_nll, run_dir / "learning_curve.png")
+    print(f"learning curve saved to {run_dir.name}/learning_curve.png")
+
     MODEL_DIR.mkdir(exist_ok=True)
-    torch.save({"state_dict": model.state_dict(), "stats": stats,
-                "config": dict(SEQ_LEN=SEQ_LEN, SEQ_COLS=SEQ_COLS, CTX_COLS=CTX_COLS,
-                               HIDDEN=HIDDEN)},
-               MODEL_DIR / "lstm.pt")
-    print(f"\nsaved to {MODEL_DIR / 'lstm.pt'}")
+    save_checkpoint(model, stats, MODEL_DIR / "lstm.pt")   # 'latest' copy for later use
+    print(f"saved to {MODEL_DIR / 'lstm.pt'}")
 
 
 if __name__ == "__main__":

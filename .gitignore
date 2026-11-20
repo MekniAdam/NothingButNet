@@ -1,0 +1,15 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Trained models and run outputs (never commit weights)
+models/
+
+# macOS
+.DS_Store
+
+# Run folders: keep params/log/metrics/plots (small, needed to trace results),
+# but never the weights inside them
+runs/**/*.pt
+runs/**/*.pkl
