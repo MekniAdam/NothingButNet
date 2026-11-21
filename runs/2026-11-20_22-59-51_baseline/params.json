@@ -1,0 +1,43 @@
+{
+  "run": "2026-11-20_22-59-51_baseline",
+  "script": "baseline.py",
+  "command": "baseline.py --frac 1.0 --seed 42",
+  "started": "2026-11-20T22:59:51",
+  "git_commit": "008b161",
+  "versions": {
+    "python": "3.12.16",
+    "numpy": "2.5.5",
+    "pandas": "3.1.1",
+    "sklearn": "1.9.1",
+    "torch": "2.15.0"
+  },
+  "params": {
+    "model": "LinearRegression + one fixed sigma",
+    "features": [
+      "PTS_ROLL5",
+      "PTS_ROLL10",
+      "PTS_STD10",
+      "MIN_ROLL5",
+      "MIN_ROLL10",
+      "FGA_ROLL5",
+      "FGA_ROLL10",
+      "FTA_ROLL5",
+      "FTA_ROLL10",
+      "REST_DAYS",
+      "B2B",
+      "HOME",
+      "GAMES_PLAYED",
+      "OPP_PTS_ALLOWED_ROLL10",
+      "OPP_PACE_ROLL10",
+      "OPP_DEF_RTG_ROLL10"
+    ],
+    "target": "PTS",
+    "line": "PROXY_LINE",
+    "split": {
+      "train": "<= 2023-24",
+      "val": "2024-25"
+    },
+    "frac": 1.0,
+    "seed": 42
+  }
+}

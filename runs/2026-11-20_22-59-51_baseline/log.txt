@@ -1,0 +1,65 @@
+run folder: runs/2026-11-20_22-59-51_baseline
+train rows: 206,237   val rows: 26,882
+
+fixed sigma: 5.91 points
+
+Validation (2024-25):
+naive (10-game avg)    MAE= 4.72  NLL=3.245  hit= 51.9%  ECE=0.041
+linear regression      MAE= 4.66  NLL=3.224  hit= 55.2%  ECE=0.049
+metrics saved to runs/2026-11-20_22-59-51_baseline/metrics.json
+
+Coefficients (points per 1 std of feature):
+FGA_ROLL10                2.38
+PTS_ROLL10                1.77
+FTA_ROLL10                0.93
+MIN_ROLL5                 0.93
+MIN_ROLL10               -0.90
+FGA_ROLL5                 0.82
+PTS_ROLL5                 0.59
+REST_DAYS                -0.31
+OPP_DEF_RTG_ROLL10        0.23
+PTS_STD10                -0.19
+OPP_PACE_ROLL10           0.18
+GAMES_PLAYED              0.14
+HOME                      0.08
+FTA_ROLL5                 0.05
+OPP_PTS_ALLOWED_ROLL10   -0.04
+B2B                       0.01
+
+saved to /Users/mek/Documents/Deep learning/NothingButNet/models
+                              mean         std
+PTS_ROLL5                10.468925    7.039662
+PTS_ROLL10               10.454696    6.765586
+PTS_STD10                 5.218679    2.078629
+MIN_ROLL5                22.854661    9.285816
+MIN_ROLL10               22.830726    8.962046
+FGA_ROLL5                 8.293188    5.128024
+FGA_ROLL10                8.286036    4.981243
+FTA_ROLL5                 2.128443    2.066874
+FTA_ROLL10                2.128534    1.948502
+REST_DAYS                 2.549033    1.500233
+B2B                       0.144310    0.351403
+HOME                      0.500856    0.499999
+GAMES_PLAYED            179.010871  143.617179
+OPP_PTS_ALLOWED_ROLL10  110.474108    6.463953
+OPP_PACE_ROLL10         101.553168    3.141475
+OPP_DEF_RTG_ROLL10      108.843479    5.190052
+intercept: 10.501001275231893
+sigma: 5.912485506731026
+FGA_ROLL10                2.376610
+PTS_ROLL10                1.771757
+FTA_ROLL10                0.934265
+MIN_ROLL5                 0.932332
+MIN_ROLL10               -0.902959
+FGA_ROLL5                 0.823698
+PTS_ROLL5                 0.592529
+REST_DAYS                -0.307616
+OPP_DEF_RTG_ROLL10        0.230144
+PTS_STD10                -0.188256
+OPP_PACE_ROLL10           0.182022
+GAMES_PLAYED              0.142748
+HOME                      0.075923
+FTA_ROLL5                 0.045668
+OPP_PTS_ALLOWED_ROLL10   -0.040419
+B2B                       0.008756
+dtype: float64

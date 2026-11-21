@@ -1,0 +1,45 @@
+{
+  "run": "2026-11-20_22-59-53_lstm",
+  "script": "lstm.py",
+  "command": "lstm.py --frac 1.0 --seed 42",
+  "started": "2026-11-20T22:59:53",
+  "git_commit": "008b161",
+  "versions": {
+    "python": "3.12.16",
+    "numpy": "2.5.5",
+    "pandas": "3.1.1",
+    "sklearn": "1.9.1",
+    "torch": "2.15.0"
+  },
+  "params": {
+    "SEQ_LEN": 10,
+    "SEQ_COLS": [
+      "PTS",
+      "MIN",
+      "FGA",
+      "FTA",
+      "HOME",
+      "REST_DAYS"
+    ],
+    "CTX_COLS": [
+      "HOME",
+      "REST_DAYS",
+      "B2B",
+      "GAMES_PLAYED_LOG",
+      "OPP_PTS_ALLOWED_ROLL10",
+      "OPP_PACE_ROLL10",
+      "OPP_DEF_RTG_ROLL10"
+    ],
+    "HIDDEN": 128,
+    "BATCH": 512,
+    "LR": 0.001,
+    "MAX_EPOCHS": 30,
+    "PATIENCE": 3,
+    "seed": 42,
+    "frac": 1.0,
+    "split": {
+      "train": "<= 2023-24",
+      "val": "2024-25"
+    }
+  }
+}

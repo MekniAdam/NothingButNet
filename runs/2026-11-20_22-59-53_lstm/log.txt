@@ -1,0 +1,38 @@
+run folder: runs/2026-11-20_22-59-53_lstm
+device: cpu
+train rows: 206,237   val rows: 26,882
+parameters: 78,978
+
+epoch  1  train loss 0.0869  val NLL 3.1619
+epoch  2  train loss 0.0656  val NLL 3.1605
+epoch  3  train loss 0.0635  val NLL 3.1605
+epoch  4  train loss 0.0615  val NLL 3.1603
+epoch  5  train loss 0.0602  val NLL 3.1587
+epoch  6  train loss 0.0595  val NLL 3.1561
+epoch  7  train loss 0.0588  val NLL 3.1605
+epoch  8  train loss 0.0582  val NLL 3.1572
+epoch  9  train loss 0.0578  val NLL 3.1591
+early stopping (val NLL stopped improving)
+
+Validation (2024-25):
+linear regression      MAE= 4.66  NLL=3.224  hit= 55.2%  ECE=0.049
+LSTM                   MAE= 4.61  NLL=3.156  hit= 56.4%  ECE=0.049
+
+By player type:
+  low scorers (<10)  (14,666 rows)
+    linear regression  MAE= 3.83  NLL=3.055  hit= 54.2%  ECE=0.069
+    LSTM               MAE= 3.77  NLL=2.981  hit= 55.6%  ECE=0.076
+  mid (10-20)  (9,079 rows)
+    linear regression  MAE= 5.35  NLL=3.340  hit= 55.5%  ECE=0.036
+    LSTM               MAE= 5.30  NLL=3.310  hit= 57.1%  ECE=0.023
+  high scorers (>20)  (3,137 rows)
+    linear regression  MAE= 6.51  NLL=3.676  hit= 58.6%  ECE=0.019
+    LSTM               MAE= 6.50  NLL=3.530  hit= 58.5%  ECE=0.012
+
+LSTM sigma (points):
+  low scorers (<10)    median sigma = 4.88
+  mid (10-20)          median sigma = 6.37
+  high scorers (>20)   median sigma = 8.01
+metrics saved to runs/2026-11-20_22-59-53_lstm/metrics.json
+learning curve saved to 2026-11-20_22-59-53_lstm/learning_curve.png
+saved to /Users/mek/Documents/Deep learning/NothingButNet/models/lstm.pt
