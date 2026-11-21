@@ -5,10 +5,11 @@ Predicts a player's points as a normal distribution:
     mean  (mu)    = linear regression on rolling features
     spread (sigma) = ONE fixed value for everyone (std of training errors)
 
-Reads:  data/clean/player_games.parquet
-Writes: models/baseline_scaler.pkl, models/baseline_model.pkl
+Reads:  data/clean/players_features.parquet   (split + features defined in split.py)
+Writes: runs/<time>_baseline/, models/baseline_scaler.pkl, models/baseline_model.pkl
 """
 
+import argparse
 from pathlib import Path
 
 import joblib
@@ -19,20 +20,21 @@ from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import StandardScaler
 
 from runlog import save_metrics, start_run
+# The split, feature list, target and line all come from split.py (one shared definition)
+from split import (FEATURES, LINE, SEED, TARGET, TRAIN_LAST, VAL_SEASON,
+                   load_players, split)
 
 ROOT = Path(__file__).resolve().parent
-DATA = ROOT / "data" / "clean" / "players_features.parquet"
 MODEL_DIR = ROOT / "models"
 
-FEATURES = [
-    "PTS_ROLL5", "PTS_ROLL10", "PTS_STD10",
-    "MIN_ROLL5", "MIN_ROLL10",
-    "FGA_ROLL5", "FGA_ROLL10", "FTA_ROLL5", "FTA_ROLL10",
-    "REST_DAYS", "B2B", "HOME", "GAMES_PLAYED",
-    "OPP_PTS_ALLOWED_ROLL10", "OPP_PACE_ROLL10", "OPP_DEF_RTG_ROLL10",
-]
-TARGET = "PTS"
-LINE = "PROXY_LINE"
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Linear regression baseline.")
+    parser.add_argument("--frac", type=float, default=1.0,
+                        help="fraction of players to use, e.g. 0.1 for a quick run (default: all)")
+    parser.add_argument("--seed", type=int, default=SEED,
+                        help="random seed (only used to pick players when --frac < 1)")
+    return parser.parse_args()
 
 
 # metrics
@@ -64,25 +66,22 @@ def evaluate(name, y, mu, sigma, line):
 
 # ------------------------------------------------------------------ main
 def main():
+    args = parse_args()
     # Run folder: params.json + log.txt + metrics.json (see runlog.py)
     run_dir = start_run("baseline", {
         "model": "LinearRegression + one fixed sigma",
         "features": FEATURES, "target": TARGET, "line": LINE,
-        "split": {"train": "<= 2023-24", "val": "2024-25"},
-        "seed": None,   # nothing random here: least squares gives the same answer every run
+        "split": {"train": f"<= {TRAIN_LAST}", "val": VAL_SEASON},
+        "frac": args.frac,
+        # least squares itself is not random; the seed only picks players when frac < 1
+        "seed": args.seed,
     })
 
-    df = pd.read_parquet(DATA)
+    df = load_players(args.frac, args.seed)
 
-    # --- split by season (time)
-    train = df[df["SEASON"] <= "2023-24"]
-    val = df[df["SEASON"] == "2024-25"]
-    # test (2025-26 onward) is NOT touched here; only evaluate on it once, at the end
-
-    # --- drop rows missing any model input, target or line
-    cols = FEATURES + [TARGET, LINE]
-    train = train.dropna(subset=cols).copy()
-    val = val.dropna(subset=cols).copy()
+    # --- split by season, keeping only usable rows (see split.py).
+    # test is NOT used here; it is evaluated once, at the very end of the project.
+    train, val, _ = split(df)
     print(f"train rows: {len(train):,}   val rows: {len(val):,}\n")
 
     # --- normalize: fit on TRAIN only
@@ -101,7 +100,7 @@ def main():
     print(f"fixed sigma: {sigma:.2f} points\n")
 
     # --- evaluate on validation
-    print("Validation (2024-25):")
+    print(f"Validation ({VAL_SEASON}):")
     # naive reference: just predict the 10-game average, same fixed-sigma idea
     naive_mu_train = train["PTS_ROLL10"].to_numpy()
     naive_sigma = np.std(y_train - naive_mu_train)

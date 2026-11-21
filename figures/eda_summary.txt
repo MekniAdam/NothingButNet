@@ -1,0 +1,20 @@
+points: mean 10.50, median 9.0, std 8.63, skew 1.06
+share of games with 0 points: 10.9%
+Gaussian fit puts 11.2% of its mass below 0 points
+spread (std of points - 10-game avg) by scoring level:
+  avg  0.0-2.5 : std 3.68  (14,741 rows)
+  avg  2.5-5.0 : std 4.52  (32,349 rows)
+  avg  5.0-7.5 : std 5.10  (36,596 rows)
+  avg  7.5-10.0: std 5.67  (32,358 rows)
+  avg 10.0-12.5: std 6.17  (25,706 rows)
+  avg 12.5-15.0: std 6.63  (19,146 rows)
+  avg 15.0-17.5: std 7.05  (13,590 rows)
+  avg 17.5-20.0: std 7.47  (9,987 rows)
+  avg 20.0-22.5: std 7.93  (7,402 rows)
+  avg 22.5-25.0: std 8.27  (5,554 rows)
+  avg 25.0-27.5: std 8.36  (4,053 rows)
+  avg 27.5-30.0: std 8.88  (2,459 rows)
+  avg 30.0-32.5: std 9.10  (1,278 rows)
+  avg 32.5-35.0: std 8.73  (511 rows)
+overall over-rate vs proxy line: 45.8% (198,835 games, pushes removed)
+training rows: 216,218  usable after dropping missing: 206,237 (95.4%)

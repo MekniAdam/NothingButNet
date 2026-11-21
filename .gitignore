@@ -13,3 +13,6 @@ models/
 # but never the weights inside them
 runs/**/*.pt
 runs/**/*.pkl
+
+# Secrets (API keys)
+.env

@@ -36,12 +36,16 @@ The core question is whether a neural network that learns a **per-player, per-ga
 
 ```
 NothingButNet/
+├── run_pipeline.py    # runs steps 1-4 + EDA with one command   
 ├── setup_data.py      # 1. download raw NBA data (nba_api) -> data/raw/
 ├── build_teams.py     # 2. clean + build features          -> data/clean/
 ├── baseline.py        # 3. linear regression + fixed sigma -> runs/, models/
 ├── lstm.py            # 4. LSTM with mean + sigma head     -> runs/, models/
+├── eda.py             # data exploration plots              -> figures/
+├── log_lines.py       # daily logger for real prop lines    -> data/lines/
 ├── runlog.py          # helper: one folder per run (params, log, metrics, plots)
-├── split.py           # scratch file for the season split (not used by the pipeline)
+├── figures/           # EDA plots
+├── split.py           # ONE shared definition of the split, features and row filter
 ├── requirements.txt
 ├── data/              # created by the scripts, NOT committed
 │   ├── raw/           #   player_gamelogs/, team_gamelogs/, schedule/
@@ -85,9 +89,28 @@ Open the `NothingButNet` folder (not a single file). Press **Cmd/Ctrl+Shift+P �
 
 ## How to run
 
-Run every command **from the project root**, in this order.
+Run every command **from the project root**.
 
-### 1. Download the data (once)
+### Everything with one command
+
+```bash
+python run_pipeline.py              # download (if needed) -> features -> EDA -> baseline -> LSTM
+python run_pipeline.py --frac 0.1   # quick check on 10% of players (~10 s once data exists)
+```
+
+| Flag | Effect |
+|---|---|
+| `--frac 0.1` | Train and evaluate the models on a random 10% of **players** (all their games). Same seed = same players. |
+| `--seed 7` | Seed for weights, shuffling and player sampling (default 42) |
+| `--epochs 5` | Maximum LSTM epochs (early stopping can end sooner) |
+| `--download` | Re-download the raw data even if `data/raw/` exists (first run downloads automatically) |
+| `--skip-eda` | Skip the data exploration plots |
+
+The pipeline stops at the first step that fails. `baseline.py` and `lstm.py` accept the same `--frac` and `--seed` flags (and `lstm.py` also `--epochs`) when run on their own.
+
+### Or step by step
+
+#### 1. Download the data (once)
 
 ```bash
 python setup_data.py
@@ -95,7 +118,7 @@ python setup_data.py
 
 Downloads player game logs, team game logs and the league schedule for every season from 2016-17 to the current one. It takes a few minutes and pauses between requests so NBA.com doesn't throttle it. Run it on your own machine: NBA.com often blocks cloud servers such as Colab. It is safe to re-run: finished seasons are skipped and only the current season is refreshed.
 
-### 2. Build the features
+#### 2. Build the features
 
 ```bash
 python build_teams.py
@@ -110,19 +133,53 @@ Produces `data/clean/players_features.parquet` (one row per player per game). It
 
 All rolling features use **previous games only** (`shift(1)`), so a row never contains information from the game being predicted.
 
-### 3. Train and evaluate the baseline
+#### 3. Train and evaluate the baseline
 
 ```bash
 python baseline.py
 ```
 
-### 4. Train and evaluate the LSTM
+#### 4. Train and evaluate the LSTM
 
 ```bash
 python lstm.py
 ```
 
 Run the baseline first: `lstm.py` loads the saved baseline to print a side-by-side comparison and to draw it on the learning curve. On CPU the LSTM trains in about a minute; on a GPU it is faster.
+
+### Data exploration
+
+```bash
+python eda.py
+```
+
+Saves six plots and a text summary to `figures/`:
+
+| File | Shows |
+|---|---|
+| `eda_1_rows_per_season.png` | Player-games per season and per split, and how many survive the missing-feature filter |
+| `eda_2_points_distribution.png` | Distribution of points vs. a Gaussian with the same mean and std |
+| `eda_3_spread_by_scoring_level.png` | Spread of (points − 10-game average) by scoring level, vs. one fixed σ |
+| `eda_4_over_rate_vs_proxy_line.png` | How often players go over the proxy line, by scoring level |
+| `eda_5_context_effects.png` | Home/away and rest-day effects on scoring vs. recent form |
+| `eda_6_missing_values.png` | Missing values per feature |
+
+All plots except the first use **training seasons only**, so validation and test data never influence modelling choices.
+
+### Logging real prop lines (daily)
+
+The free plan of [The Odds API](https://the-odds-api.com) has no historical odds, so real lines have to be saved **before each game, every day**.
+
+1. Get a free API key (500 credits/month) at <https://the-odds-api.com>.
+2. Create a file named `.env` in the project root containing `ODDS_API_KEY=your_key_here`. It is git-ignored: **never commit the key**.
+3. Once a day, a few hours before the first tip-off:
+
+```bash
+python log_lines.py --dry-run   # list today's games, uses no credits
+python log_lines.py             # download player-points lines (~1 credit per game)
+```
+
+Each run saves the raw API responses to `data/lines/raw/` and appends one row per player × bookmaker × Over/Under to `data/lines/player_points_lines.csv`. One run per day fits in the free credits; the script prints how many are left. Like the rest of `data/`, these files are not committed, so whoever runs the logger should back them up.
 
 ### Data split (by season, no look-ahead)
 
@@ -160,8 +217,9 @@ runs/2026-11-20_18-06-40_lstm/
 - [x] Linear-regression baseline with fixed σ
 - [x] LSTM with per-game σ, trained with Gaussian NLL and early stopping
 - [x] Run folders and learning curve
-- [ ] Daily logger for real prop lines (SportsGameOdds / The Odds API)
-- [ ] Data exploration plots
+- [x] Data exploration plots (`eda.py`)
+- [x] Daily logger for real prop lines (`log_lines.py`, The Odds API)
+- [ ] Logger running every day, plus matching logged lines to box scores (player names → `PLAYER_ID`)
 - [ ] Injury "temperature" on σ
 - [ ] News "temperature" on σ (GDELT headlines + DistilBERT)
 - [ ] Controlled experiment: base vs. +injuries vs. +news
@@ -173,6 +231,7 @@ runs/2026-11-20_18-06-40_lstm/
 ## Data and responsible use
 
 - Box scores and schedules come from NBA.com through the open-source [`nba_api`](https://github.com/swar/nba_api) package. Data is **not** committed to this repo; run `setup_data.py` to reproduce it.
+- Prop lines come from [The Odds API](https://the-odds-api.com) under its free plan terms. They are not committed either.
 - Never commit datasets, large weight files or API keys.
 - This is a course project about uncertainty estimation. It is **not** betting advice, and the model must not be used to make decisions about real people.
 

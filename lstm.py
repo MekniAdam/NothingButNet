@@ -9,14 +9,15 @@ Inputs for each player-game:
   * sequence: the player's last N games (points, minutes, shots, home, rest)
   * context:  what we know about TONIGHT (home, rest, opponent defense, history length)
 
-Reads:  data/clean/players_features.parquet
+Reads:  data/clean/players_features.parquet   (split + features defined in split.py)
         models/baseline_*.pkl   (optional, for a side-by-side comparison)
-Writes: models/lstm.pt
+Writes: runs/<time>_lstm/, models/lstm.pt
 
 Run from the project root (same folder as baseline.py):
     python lstm.py
 """
 
+import argparse
 from pathlib import Path
 
 import joblib
@@ -26,17 +27,17 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
-# Reuse the exact same metrics, features and row filter as the baseline,
+# Same metrics as the baseline, and the same split / row filter from split.py,
 # so the comparison is apples to apples.
-from baseline import FEATURES, LINE, TARGET, evaluate
+from baseline import evaluate
 from runlog import save_metrics, start_run
+from split import LINE, SEED, TARGET, TRAIN_LAST, VAL_SEASON, load_players, split_masks
 
 import matplotlib
 matplotlib.use("Agg")          # draw plots to files, no window needed
 import matplotlib.pyplot as plt
 
 ROOT = Path(__file__).resolve().parent
-DATA = ROOT / "data" / "clean" / "players_features.parquet"
 MODEL_DIR = ROOT / "models"
 
 # ------------------------------------------------------------------ settings
@@ -51,7 +52,6 @@ BATCH = 512
 LR = 1e-3
 MAX_EPOCHS = 30
 PATIENCE = 3            # stop if val NLL doesn't improve for this many epochs
-SEED = 42
 
 
 # ------------------------------------------------------------------ data
@@ -79,11 +79,10 @@ def prepare(df):
     seq_raw = build_sequences(df)          # built on ALL rows so history is complete
     has_game = ~np.isnan(seq_raw[:, :, :1])                   # (rows, SEQ_LEN, 1)
 
-    # Same rows as the baseline (needs features, target and a line).
-    usable = df[FEATURES + [TARGET, LINE]].notna().all(axis=1)
-    train_m = usable & (df["SEASON"] <= "2023-24")
-    val_m = usable & (df["SEASON"] == "2024-25")
-    # test (2025-26 onward) is NOT touched here; evaluate on it once, at the very end
+    # Same rows as the baseline: usable rows of each split (see split.py).
+    # test is NOT used here; it is evaluated once, at the very end of the project.
+    masks = split_masks(df)
+    train_m, val_m = masks["train"], masks["val"]
 
     # --- scaling statistics from TRAIN rows only
     seq_mean = np.nanmean(df.loc[train_m, SEQ_COLS].to_numpy(float), axis=0)
@@ -155,7 +154,7 @@ def plot_learning_curve(history, best_epoch, baseline_nll, path):
     epochs = [h["epoch"] for h in history]
     fig, ax = plt.subplots(figsize=(6, 4))
     ax.plot(epochs, [h["train_nll"] for h in history], marker="o", label="train NLL")
-    ax.plot(epochs, [h["val_nll"] for h in history], marker="o", label="val NLL (2024-25)")
+    ax.plot(epochs, [h["val_nll"] for h in history], marker="o", label=f"val NLL ({VAL_SEASON})")
     ax.axvline(best_epoch, color="gray", linestyle=":", label=f"best epoch ({best_epoch})")
     if baseline_nll is not None:
         ax.axhline(baseline_nll, color="red", linestyle="--",
@@ -169,21 +168,33 @@ def plot_learning_curve(history, best_epoch, baseline_nll, path):
     plt.close(fig)
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="LSTM with a mean + sigma head.")
+    parser.add_argument("--frac", type=float, default=1.0,
+                        help="fraction of players to use, e.g. 0.1 for a quick run (default: all)")
+    parser.add_argument("--seed", type=int, default=SEED,
+                        help="random seed for weights, shuffling and player sampling")
+    parser.add_argument("--epochs", type=int, default=MAX_EPOCHS,
+                        help="maximum epochs (early stopping may end sooner)")
+    return parser.parse_args()
+
+
 def main():
+    args = parse_args()
     # Run folder: params.json + log.txt + metrics.json + history.csv + plots (see runlog.py)
     run_dir = start_run("lstm", {
         "SEQ_LEN": SEQ_LEN, "SEQ_COLS": SEQ_COLS, "CTX_COLS": CTX_COLS,
-        "HIDDEN": HIDDEN, "BATCH": BATCH, "LR": LR, "MAX_EPOCHS": MAX_EPOCHS,
-        "PATIENCE": PATIENCE, "seed": SEED,
-        "split": {"train": "<= 2023-24", "val": "2024-25"},
+        "HIDDEN": HIDDEN, "BATCH": BATCH, "LR": LR, "MAX_EPOCHS": args.epochs,
+        "PATIENCE": PATIENCE, "seed": args.seed, "frac": args.frac,
+        "split": {"train": f"<= {TRAIN_LAST}", "val": VAL_SEASON},
     })
 
-    torch.manual_seed(SEED)
-    np.random.seed(SEED)
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"device: {device}")
 
-    df, seq, ctx, y, train_m, val_m, stats = prepare(pd.read_parquet(DATA))
+    df, seq, ctx, y, train_m, val_m, stats = prepare(load_players(args.frac, args.seed))
     print(f"train rows: {train_m.sum():,}   val rows: {val_m.sum():,}")
 
     y_scaled = ((y - stats["y_mean"]) / stats["y_std"]).astype(np.float32)
@@ -203,7 +214,7 @@ def main():
     # points (same scale as val NLL), because sigma_points = sigma_scaled * y_std
     to_points = np.log(stats["y_std"]) + 0.5 * np.log(2 * np.pi)
 
-    for epoch in range(1, MAX_EPOCHS + 1):
+    for epoch in range(1, args.epochs + 1):
         model.train()
         total = 0.0
         for s, c, t in loader:
@@ -239,7 +250,7 @@ def main():
 
     # ------------------------------------------------------------ results
     val = df.loc[val_m]
-    print("\nValidation (2024-25):")
+    print(f"\nValidation ({VAL_SEASON}):")
     results = {"LSTM": (mu_v, sig_v)}
     base_path = MODEL_DIR / "baseline_model.pkl"
     if base_path.exists():
